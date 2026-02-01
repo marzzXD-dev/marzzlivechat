@@ -677,10 +677,12 @@
         
         function connectToServer() {
             // Connect to WebSocket server
-            socket = io('http://ntfserver.pterodacytl.my.id', {
-                transports: ['websocket'],
-                auth: {
-                    user: currentUser
+            socket = io('https://marzzlivechat-production.up.railway.app', {
+    path: '/socket.io/',
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: 5,
+    timeout: 10000
                 }
             });
             
@@ -917,3 +919,4 @@
     </script>
 </body>
 </html>
+
