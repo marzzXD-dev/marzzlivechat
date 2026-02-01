@@ -171,7 +171,7 @@ io.on('connection', (socket) => {
 });
 
 // ========== START SERVER ==========
-const PORT = process.env.PORT || 443;
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 Health check: http://localhost:${PORT}/health`);
@@ -186,4 +186,5 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason, promise) => {
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
+
 
