@@ -1,81 +1,62 @@
 const express = require('express');
 const http = require('http');
-const socketIo = require('socket.io');
+const { Server } = require('socket.io');
 const cors = require('cors');
-const path = require('path');
 
 const app = express();
-const server = http.createServer(app);
 
-// Middleware
-app.use(cors());
+// ========== RAILWAY FIX ==========
+// PORT harus dari environment variable
+const PORT = process.env.PORT || 8080;
+
+// CORS untuk Railway
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    credentials: true
+}));
+
 app.use(express.json());
-app.use(express.static('public')); // Untuk serve static files
 
-// ========== FIX: TAMBAH ROUTE UTAMA ==========
+// Root endpoint untuk Railway health check
 app.get('/', (req, res) => {
     res.json({
         status: 'online',
-        service: 'RGB Group Chat Server',
-        timestamp: new Date().toISOString(),
-        endpoints: {
-            root: '/',
-            health: '/health',
-            users: '/api/users',
-            messages: '/api/messages',
-            websocket: '/socket.io/'
-        }
-    });
-});
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
+        service: 'RGB Chat Server',
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
-        memory: process.memoryUsage()
+        environment: process.env.NODE_ENV || 'development'
     });
 });
 
-// API endpoints
-app.get('/api/users', (req, res) => {
-    res.json({
-        total: users.size,
-        online: Array.from(users.values()).filter(u => u.online).length,
-        users: Array.from(users.values()).map(u => ({
-            id: u.id,
-            name: u.name,
-            online: u.online,
-            joinedAt: u.joinedAt
-        }))
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'healthy',
+        timestamp: new Date().toISOString() 
     });
 });
 
-app.get('/api/messages', (req, res) => {
-    res.json({
-        total: messageHistory.length,
-        messages: messageHistory.slice(-20)
-    });
-});
+// ========== SOCKET.IO ==========
+const server = http.createServer(app);
 
-// ========== SOCKET.IO SETUP ==========
-const io = socketIo(server, {
+const io = new Server(server, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
-// Store connected users
+// Store users
 const users = new Map();
-const messageHistory = [];
+const messages = [];
 
 io.on('connection', (socket) => {
     console.log('🔗 New connection:', socket.id);
     
-    // Handle user join
+    // User join
     socket.on('user:join', (userData) => {
         const user = {
             id: socket.id,
@@ -93,22 +74,20 @@ io.on('connection', (socket) => {
         // Broadcast to others
         socket.broadcast.emit('user:joined', user);
         
-        // Send welcome message
+        // Welcome message
         socket.emit('system:message', {
-            type: 'welcome',
             text: `Welcome ${user.name}!`,
-            timestamp: new Date().toISOString()
+            type: 'welcome'
         });
         
-        // Broadcast join notification
+        // Notify others
         socket.broadcast.emit('system:message', {
-            type: 'info',
             text: `${user.name} joined the chat`,
-            timestamp: new Date().toISOString()
+            type: 'info'
         });
         
         // Send message history
-        socket.emit('messages:history', messageHistory.slice(-50));
+        socket.emit('messages:history', messages.slice(-50));
     });
     
     // Handle messages
@@ -125,15 +104,14 @@ io.on('connection', (socket) => {
             timestamp: new Date().toISOString()
         };
         
-        // Store message
-        messageHistory.push(message);
-        if (messageHistory.length > 1000) messageHistory.shift();
+        messages.push(message);
+        if (messages.length > 1000) messages.shift();
         
         // Broadcast to all
         io.emit('message:receive', message);
     });
     
-    // Handle typing
+    // Typing indicators
     socket.on('typing:start', () => {
         const user = users.get(socket.id);
         if (user) {
@@ -157,34 +135,42 @@ io.on('connection', (socket) => {
         const user = users.get(socket.id);
         if (user) {
             users.delete(socket.id);
-            
-            // Broadcast leave
             io.emit('user:left', socket.id);
-            
             io.emit('system:message', {
-                type: 'info',
                 text: `${user.name} left the chat`,
-                timestamp: new Date().toISOString()
+                type: 'info'
             });
         }
     });
 });
 
 // ========== START SERVER ==========
-const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌐 Health check: http://localhost:${PORT}/health`);
-    console.log(`📡 WebSocket: ws://localhost:${PORT}`);
+    console.log(`📡 WebSocket ready`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// Handle uncaught errors
-process.on('uncaughtException', (err) => {
-    console.error('Uncaught Exception:', err);
+// Error handling
+server.on('error', (error) => {
+    console.error('Server error:', error);
+    if (error.code === 'EADDRINUSE') {
+        console.log(`Port ${PORT} is already in use`);
+    }
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully...');
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
 });
 
-
+process.on('SIGINT', () => {
+    console.log('SIGINT received, shutting down...');
+    server.close(() => {
+        process.exit(0);
+    });
+});
